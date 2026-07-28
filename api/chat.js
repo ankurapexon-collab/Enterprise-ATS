@@ -1,95 +1,34 @@
 // api/chat.js
-// Resilient Multi-Provider Gateway with Token Optimization & Live Diagnostics
+// High-Quota Free Tier Serverless Function (Supports Lakhs of Tokens)
 
-const DEFAULT_SYSTEM_INSTRUCTION = `You are TalentTrack AI, an elite Senior Talent Acquisition Partner and HR Architect.
+const DEFAULT_SYSTEM_INSTRUCTION = 
+  "You are TalentTrack AI, an elite Talent Acquisition assistant. Always structure your responses cleanly, professionally, and comprehensively. Avoid raw markdown artifacts (like '#---' or '***'). Use clear numbered headers, bold sub-topics, bullet points, and clean lists. NEVER cut off or truncate answers midway — complete every response fully.";
 
-CRITICAL ANALYTICAL TASK DIRECTIVE FOR JOB DESCRIPTION GENERATION:
-1. DEEP INPUT ANALYSIS: Carefully analyze ALL provided user inputs—especially "Core Responsibilities", "Technical Skills", "Job Title", and custom requirements.
-2. TAILORED GENERATION: Do NOT generate a generic template JD. The generated Job Description MUST be uniquely built around, tailored to, and centered on the user's specific inputs.
-3. EXPAND & SYNTHESIZE: Take every user-provided technical skill and core responsibility, analyze its real-world application for the role, and expand it into professional, clear, impactful, and actionable bullet points.
-4. ZERO OMISSION: You are STRICTLY FORBIDDEN from ignoring, omitting, or replacing any user-supplied skill, tool, framework, or responsibility with generic defaults.
-
-FORMATTING & RESPONSE RULES:
-- Structure responses cleanly with clear bold headers, bullet points, and clean lists.
-- Avoid raw markdown artifacts (like '#---' or '***').
-- NEVER cut off or truncate answers midway — complete every response fully.`;
-
-// High-Quota Free Tier Models
-const GEMINI_MODELS = ['gemini-1.5-flash', 'gemini-1.5-flash-8b', 'gemini-2.0-flash', 'gemini-1.5-pro'];
-const CEREBRAS_MODELS = ['llama3.1-8b', 'llama3.3-70b'];
-const GROQ_MODELS = ['llama-3.1-8b-instant', 'mixtral-8x7b-32768', 'llama-3.3-70b-versatile'];
-const MISTRAL_MODELS = ['mistral-small-latest', 'open-mistral-7b', 'mistral-medium-latest'];
-const OPENROUTER_FREE_MODELS = [
-  'google/gemini-2.0-flash-exp:free',
-  'meta-llama/llama-3.3-70b-instruct:free',
-  'qwen/qwen-2.5-72b-instruct:free',
-  'deepseek/deepseek-r1:free',
-  'mistralai/mistral-7b-instruct:free'
+// 10 Lakhs TPM Free Tier Models (Google AI Studio)
+const GEMINI_MODELS = [
+  'gemini-1.5-flash',
+  'gemini-1.5-flash-8b',
+  'gemini-2.0-flash'
 ];
 
-// Smart Input Aggregator
-function buildComprehensivePrompt(body) {
-  if (!body || typeof body !== 'object') return '';
+// High-TPD Free Models (Groq - 5 Lakhs Tokens/Day)
+const GROQ_MODELS = [
+  'llama-3.1-8b-instant',      // 500,000 Tokens/Day (5 Lakhs TPD)
+  'llama-3.3-70b-versatile'    // Fallback model
+];
 
-  let basePrompt = body.prompt || body.userPrompt || body.message || '';
-  let extraParts = [];
-
-  const jobTitle = body.jobTitle || body.title || body.role;
-  if (jobTitle && !basePrompt.toLowerCase().includes(String(jobTitle).toLowerCase())) {
-    extraParts.push(`### TARGET JOB TITLE:\n${jobTitle}`);
-  }
-
-  const responsibilities = body.coreResponsibilities || body.responsibilities || body.duties || body.core_responsibilities;
-  if (responsibilities && !basePrompt.includes(String(responsibilities))) {
-    extraParts.push(`### USER-PROVIDED CORE RESPONSIBILITIES (ANALYZE & EXPAND THESE IN DETAIL):\n${responsibilities}`);
-  }
-
-  const skills = body.technicalSkills || body.skills || body.techSkills || body.requirements || body.technical_skills;
-  if (skills && !basePrompt.includes(String(skills))) {
-    extraParts.push(`### USER-PROVIDED TECHNICAL SKILLS (ANALYZE & INTEGRATE ALL OF THESE):\n${skills}`);
-  }
-
-  const nestedData = body.formData || body.inputs || body.data;
-  if (nestedData && typeof nestedData === 'object') {
-    for (const [key, value] of Object.entries(nestedData)) {
-      if (value && !basePrompt.includes(String(value))) {
-        extraParts.push(`### USER-PROVIDED ${key.toUpperCase()}:\n${value}`);
-      }
-    }
-  }
-
-  if (!basePrompt && extraParts.length === 0) {
-    for (const [key, value] of Object.entries(body)) {
-      if (typeof value === 'string' && key !== 'system' && value.trim()) {
-        extraParts.push(`### ${key.toUpperCase()}:\n${value}`);
-      }
-    }
-  }
-
-  let finalPrompt = basePrompt;
-  if (extraParts.length > 0) {
-    finalPrompt = basePrompt 
-      ? `${basePrompt}\n\n${extraParts.join('\n\n')}` 
-      : extraParts.join('\n\n');
-  }
-
-  finalPrompt += `\n\n[ANALYTICAL MANDATE: Perform a detailed analysis of the Core Responsibilities and Technical Skills provided above. Expand them professionally and generate a complete Job Description strictly centered around these analyzed inputs.]`;
-
-  return finalPrompt;
-}
-
-// Provider 1: Gemini API
 async function callGemini(modelName, apiKey, system, prompt) {
-  const combinedSystem = system ? `${system}\n\n${DEFAULT_SYSTEM_INSTRUCTION}` : DEFAULT_SYSTEM_INSTRUCTION;
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        system_instruction: { parts: [{ text: combinedSystem }] },
+        system_instruction: { 
+          parts: [{ text: (system ? `${system}\n\n${DEFAULT_SYSTEM_INSTRUCTION}` : DEFAULT_SYSTEM_INSTRUCTION) }] 
+        },
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.3, maxOutputTokens: 3500 }, // Token-optimized
+        generationConfig: { temperature: 0.5, maxOutputTokens: 8192 },
       }),
     }
   );
@@ -97,24 +36,21 @@ async function callGemini(modelName, apiKey, system, prompt) {
   return { ok: res.ok, status: res.status, data };
 }
 
-// Universal OpenAI-compatible Caller (Cerebras, Groq, Mistral, OpenRouter)
-async function callOpenAICompatible(endpoint, modelName, apiKey, system, prompt, extraHeaders = {}) {
-  const combinedSystem = system ? `${system}\n\n${DEFAULT_SYSTEM_INSTRUCTION}` : DEFAULT_SYSTEM_INSTRUCTION;
-  const res = await fetch(endpoint, {
+async function callGroq(modelName, apiKey, system, prompt) {
+  const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      ...extraHeaders
+      'Content-Type': 'application/json'
     },
     body: JSON.stringify({
       model: modelName,
       messages: [
-        { role: 'system', content: combinedSystem },
+        { role: 'system', content: system ? `${system}\n\n${DEFAULT_SYSTEM_INSTRUCTION}` : DEFAULT_SYSTEM_INSTRUCTION },
         { role: 'user', content: prompt }
       ],
-      temperature: 0.3,
-      max_tokens: 3000 // Token-optimized
+      temperature: 0.5,
+      max_tokens: 4096
     })
   });
   const data = await res.json();
@@ -136,44 +72,30 @@ export default async function handler(req, res) {
     return;
   }
 
-  let prompt = buildComprehensivePrompt(req.body || {});
-  const system = req.body?.system || '';
-
-  if (!prompt || prompt.trim().length === 0) {
-    res.status(400).json({ error: 'Missing prompt or input data in request body.' });
+  let { system, prompt } = req.body || {};
+  if (!prompt) {
+    res.status(400).json({ error: 'Missing "prompt" in request body.' });
     return;
   }
 
-  if (prompt.length > 25000) {
-    prompt = prompt.substring(0, 25000) + "\n\n[Note: Input safety-trimmed to fit free token limits.]";
+  // Safety prompt check: Prevent single prompt inputs > 35,000 chars from blowing up token limits
+  if (prompt.length > 35000) {
+    prompt = prompt.substring(0, 35000) + "\n\n[Note: Prompt safety-trimmed to remain within free token quotas.]";
   }
 
   const geminiKey = process.env.GEMINI_API_KEY;
-  const cerebrasKey = process.env.CEREBRAS_API_KEY;
   const groqKey = process.env.GROQ_API_KEY;
-  const mistralKey = process.env.MISTRAL_API_KEY;
-  const openrouterKey = process.env.OPENROUTER_API_KEY;
 
-  // Diagnostic Object: Checks which keys are currently visible to Vercel
-  const keyStatus = {
-    gemini: !!geminiKey,
-    cerebras: !!cerebrasKey,
-    groq: !!groqKey,
-    mistral: !!mistralKey,
-    openrouter: !!openrouterKey
-  };
-
-  if (!geminiKey && !cerebrasKey && !groqKey && !mistralKey && !openrouterKey) {
+  if (!geminiKey && !groqKey) {
     res.status(500).json({
-      error: 'No API Keys detected by Vercel. Please set environment variables and click REDEPLOY.',
-      detectedKeys: keyStatus
+      error: 'Missing GEMINI_API_KEY or GROQ_API_KEY in Vercel Environment Variables.'
     });
     return;
   }
 
   let lastError = null;
 
-  // 1. Gemini (10 Lakhs Tokens/Min Free)
+  // 1. Try Gemini Models (Provides 10 Lakhs TPM Free)
   if (geminiKey) {
     for (const modelName of GEMINI_MODELS) {
       try {
@@ -181,7 +103,7 @@ export default async function handler(req, res) {
         if (ok) {
           const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
           if (text) {
-            res.status(200).json({ text, modelUsed: modelName, detectedKeys: keyStatus });
+            res.status(200).json({ text, modelUsed: modelName });
             return;
           }
         }
@@ -192,46 +114,15 @@ export default async function handler(req, res) {
     }
   }
 
-  // 2. Cerebras Inference (10 Lakhs Tokens/Day Free)
-  if (cerebrasKey) {
-    for (const modelName of CEREBRAS_MODELS) {
-      try {
-        const { ok, data } = await callOpenAICompatible(
-          'https://api.cerebras.ai/v1/chat/completions',
-          modelName,
-          cerebrasKey,
-          system,
-          prompt
-        );
-        if (ok) {
-          const text = data?.choices?.[0]?.message?.content?.trim();
-          if (text) {
-            res.status(200).json({ text, modelUsed: `cerebras/${modelName}`, detectedKeys: keyStatus });
-            return;
-          }
-        }
-        lastError = data?.error?.message || `Cerebras ${modelName} failed`;
-      } catch (err) {
-        lastError = err.message;
-      }
-    }
-  }
-
-  // 3. Groq (5 Lakhs Tokens/Day Free)
+  // 2. Try Groq Models (Provides 5 Lakhs TPD Free)
   if (groqKey) {
     for (const modelName of GROQ_MODELS) {
       try {
-        const { ok, data } = await callOpenAICompatible(
-          'https://api.groq.com/openai/v1,chat/completions',
-          modelName,
-          groqKey,
-          system,
-          prompt
-        );
+        const { ok, data } = await callGroq(modelName, groqKey, system, prompt);
         if (ok) {
           const text = data?.choices?.[0]?.message?.content?.trim();
           if (text) {
-            res.status(200).json({ text, modelUsed: `groq/${modelName}`, detectedKeys: keyStatus });
+            res.status(200).json({ text, modelUsed: `groq/${modelName}` });
             return;
           }
         }
@@ -242,59 +133,7 @@ export default async function handler(req, res) {
     }
   }
 
-  // 4. Mistral AI
-  if (mistralKey) {
-    for (const modelName of MISTRAL_MODELS) {
-      try {
-        const { ok, data } = await callOpenAICompatible(
-          'https://api.mistral.ai/v1/chat/completions',
-          modelName,
-          mistralKey,
-          system,
-          prompt
-        );
-        if (ok) {
-          const text = data?.choices?.[0]?.message?.content?.trim();
-          if (text) {
-            res.status(200).json({ text, modelUsed: `mistral/${modelName}`, detectedKeys: keyStatus });
-            return;
-          }
-        }
-        lastError = data?.error?.message || `Mistral ${modelName} failed`;
-      } catch (err) {
-        lastError = err.message;
-      }
-    }
-  }
-
-  // 5. OpenRouter Free Models
-  if (openrouterKey) {
-    for (const modelName of OPENROUTER_FREE_MODELS) {
-      try {
-        const { ok, data } = await callOpenAICompatible(
-          'https://openrouter.ai/api/v1/chat/completions',
-          modelName,
-          openrouterKey,
-          system,
-          prompt,
-          { 'HTTP-Referer': 'https://vercel.com', 'X-Title': 'TalentTrack AI' }
-        );
-        if (ok) {
-          const text = data?.choices?.[0]?.message?.content?.trim();
-          if (text) {
-            res.status(200).json({ text, modelUsed: `openrouter/${modelName}`, detectedKeys: keyStatus });
-            return;
-          }
-        }
-        lastError = data?.error?.message || `OpenRouter ${modelName} failed`;
-      } catch (err) {
-        lastError = err.message;
-      }
-    }
-  }
-
   res.status(502).json({
-    error: `All 5 AI providers failed or exceeded quota. Last error: ${lastError}`,
-    detectedKeys: keyStatus
+    error: `All AI models failed or exceeded quota. Last error: ${lastError}`
   });
 }
