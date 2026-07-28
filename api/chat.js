@@ -1,5 +1,5 @@
 // api/chat.js
-// 5-Provider Free AI Gateway: Gemini + Cerebras + Groq + Mistral + OpenRouter
+// Resilient Multi-Provider Gateway with Token Optimization & Live Diagnostics
 
 const DEFAULT_SYSTEM_INSTRUCTION = `You are TalentTrack AI, an elite Senior Talent Acquisition Partner and HR Architect.
 
@@ -14,35 +14,11 @@ FORMATTING & RESPONSE RULES:
 - Avoid raw markdown artifacts (like '#---' or '***').
 - NEVER cut off or truncate answers midway — complete every response fully.`;
 
-// Tier 1: Gemini Direct (10 Lakhs Tokens/Min Free)
-const GEMINI_MODELS = [
-  'gemini-1.5-flash',
-  'gemini-1.5-flash-8b',
-  'gemini-2.0-flash',
-  'gemini-1.5-pro'
-];
-
-// Tier 2: Cerebras Inference (10 Lakhs Tokens/Day Free - Ultra Fast 2000+ tok/s)
-const CEREBRAS_MODELS = [
-  'llama3.1-8b',
-  'llama3.3-70b'
-];
-
-// Tier 3: Groq Direct (5 Lakhs Tokens/Day Free)
-const GROQ_MODELS = [
-  'llama-3.1-8b-instant',
-  'mixtral-8x7b-32768',
-  'llama-3.3-70b-versatile'
-];
-
-// Tier 4: Mistral AI (Free Experimental Tier)
-const MISTRAL_MODELS = [
-  'mistral-small-latest',
-  'open-mistral-7b',
-  'mistral-medium-latest'
-];
-
-// Tier 5: OpenRouter Free Models
+// High-Quota Free Tier Models
+const GEMINI_MODELS = ['gemini-1.5-flash', 'gemini-1.5-flash-8b', 'gemini-2.0-flash', 'gemini-1.5-pro'];
+const CEREBRAS_MODELS = ['llama3.1-8b', 'llama3.3-70b'];
+const GROQ_MODELS = ['llama-3.1-8b-instant', 'mixtral-8x7b-32768', 'llama-3.3-70b-versatile'];
+const MISTRAL_MODELS = ['mistral-small-latest', 'open-mistral-7b', 'mistral-medium-latest'];
 const OPENROUTER_FREE_MODELS = [
   'google/gemini-2.0-flash-exp:free',
   'meta-llama/llama-3.3-70b-instruct:free',
@@ -113,7 +89,7 @@ async function callGemini(modelName, apiKey, system, prompt) {
       body: JSON.stringify({
         system_instruction: { parts: [{ text: combinedSystem }] },
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.3, maxOutputTokens: 8192 },
+        generationConfig: { temperature: 0.3, maxOutputTokens: 3500 }, // Token-optimized
       }),
     }
   );
@@ -138,7 +114,7 @@ async function callOpenAICompatible(endpoint, modelName, apiKey, system, prompt,
         { role: 'user', content: prompt }
       ],
       temperature: 0.3,
-      max_tokens: 4096
+      max_tokens: 3000 // Token-optimized
     })
   });
   const data = await res.json();
@@ -168,8 +144,8 @@ export default async function handler(req, res) {
     return;
   }
 
-  if (prompt.length > 35000) {
-    prompt = prompt.substring(0, 35000) + "\n\n[Note: Input safety-trimmed to fit free token limits.]";
+  if (prompt.length > 25000) {
+    prompt = prompt.substring(0, 25000) + "\n\n[Note: Input safety-trimmed to fit free token limits.]";
   }
 
   const geminiKey = process.env.GEMINI_API_KEY;
@@ -178,16 +154,26 @@ export default async function handler(req, res) {
   const mistralKey = process.env.MISTRAL_API_KEY;
   const openrouterKey = process.env.OPENROUTER_API_KEY;
 
+  // Diagnostic Object: Checks which keys are currently visible to Vercel
+  const keyStatus = {
+    gemini: !!geminiKey,
+    cerebras: !!cerebrasKey,
+    groq: !!groqKey,
+    mistral: !!mistralKey,
+    openrouter: !!openrouterKey
+  };
+
   if (!geminiKey && !cerebrasKey && !groqKey && !mistralKey && !openrouterKey) {
     res.status(500).json({
-      error: 'Missing API Keys. Please set GEMINI_API_KEY, CEREBRAS_API_KEY, GROQ_API_KEY, MISTRAL_API_KEY, or OPENROUTER_API_KEY in Vercel Environment Variables.'
+      error: 'No API Keys detected by Vercel. Please set environment variables and click REDEPLOY.',
+      detectedKeys: keyStatus
     });
     return;
   }
 
   let lastError = null;
 
-  // 1. Provider 1: Gemini Direct
+  // 1. Gemini (10 Lakhs Tokens/Min Free)
   if (geminiKey) {
     for (const modelName of GEMINI_MODELS) {
       try {
@@ -195,7 +181,7 @@ export default async function handler(req, res) {
         if (ok) {
           const text = data?.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
           if (text) {
-            res.status(200).json({ text, modelUsed: modelName });
+            res.status(200).json({ text, modelUsed: modelName, detectedKeys: keyStatus });
             return;
           }
         }
@@ -206,7 +192,7 @@ export default async function handler(req, res) {
     }
   }
 
-  // 2. Provider 2: Cerebras Inference (Ultra Fast)
+  // 2. Cerebras Inference (10 Lakhs Tokens/Day Free)
   if (cerebrasKey) {
     for (const modelName of CEREBRAS_MODELS) {
       try {
@@ -220,7 +206,7 @@ export default async function handler(req, res) {
         if (ok) {
           const text = data?.choices?.[0]?.message?.content?.trim();
           if (text) {
-            res.status(200).json({ text, modelUsed: `cerebras/${modelName}` });
+            res.status(200).json({ text, modelUsed: `cerebras/${modelName}`, detectedKeys: keyStatus });
             return;
           }
         }
@@ -231,12 +217,12 @@ export default async function handler(req, res) {
     }
   }
 
-  // 3. Provider 3: Groq Direct
+  // 3. Groq (5 Lakhs Tokens/Day Free)
   if (groqKey) {
     for (const modelName of GROQ_MODELS) {
       try {
         const { ok, data } = await callOpenAICompatible(
-          'https://api.groq.com/openai/v1/chat/completions',
+          'https://api.groq.com/openai/v1,chat/completions',
           modelName,
           groqKey,
           system,
@@ -245,7 +231,7 @@ export default async function handler(req, res) {
         if (ok) {
           const text = data?.choices?.[0]?.message?.content?.trim();
           if (text) {
-            res.status(200).json({ text, modelUsed: `groq/${modelName}` });
+            res.status(200).json({ text, modelUsed: `groq/${modelName}`, detectedKeys: keyStatus });
             return;
           }
         }
@@ -256,7 +242,7 @@ export default async function handler(req, res) {
     }
   }
 
-  // 4. Provider 4: Mistral AI
+  // 4. Mistral AI
   if (mistralKey) {
     for (const modelName of MISTRAL_MODELS) {
       try {
@@ -270,7 +256,7 @@ export default async function handler(req, res) {
         if (ok) {
           const text = data?.choices?.[0]?.message?.content?.trim();
           if (text) {
-            res.status(200).json({ text, modelUsed: `mistral/${modelName}` });
+            res.status(200).json({ text, modelUsed: `mistral/${modelName}`, detectedKeys: keyStatus });
             return;
           }
         }
@@ -281,7 +267,7 @@ export default async function handler(req, res) {
     }
   }
 
-  // 5. Provider 5: OpenRouter Free Models
+  // 5. OpenRouter Free Models
   if (openrouterKey) {
     for (const modelName of OPENROUTER_FREE_MODELS) {
       try {
@@ -296,7 +282,7 @@ export default async function handler(req, res) {
         if (ok) {
           const text = data?.choices?.[0]?.message?.content?.trim();
           if (text) {
-            res.status(200).json({ text, modelUsed: `openrouter/${modelName}` });
+            res.status(200).json({ text, modelUsed: `openrouter/${modelName}`, detectedKeys: keyStatus });
             return;
           }
         }
@@ -308,6 +294,7 @@ export default async function handler(req, res) {
   }
 
   res.status(502).json({
-    error: `All 5 AI providers failed or exceeded quota. Last error: ${lastError}`
+    error: `All 5 AI providers failed or exceeded quota. Last error: ${lastError}`,
+    detectedKeys: keyStatus
   });
 }
