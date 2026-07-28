@@ -1,23 +1,34 @@
 // api/chat.js
-// High-Quota Free Tier Serverless Function (Supports Lakhs of Tokens)
+// Runs on Vercel Serverless. Enhanced with Strict User-Input Fidelity for JD Generator.
 
-const DEFAULT_SYSTEM_INSTRUCTION = 
-  "You are TalentTrack AI, an elite Talent Acquisition assistant. Always structure your responses cleanly, professionally, and comprehensively. Avoid raw markdown artifacts (like '#---' or '***'). Use clear numbered headers, bold sub-topics, bullet points, and clean lists. NEVER cut off or truncate answers midway — complete every response fully.";
+const DEFAULT_SYSTEM_INSTRUCTION = `You are TalentTrack AI, an elite Talent Acquisition assistant.
 
-// 10 Lakhs TPM Free Tier Models (Google AI Studio)
+CRITICAL INSTRUCTION FOR ALL GENERATIONS (Job Descriptions, Resumes, Interview Questions):
+1. STRICT USER-INPUT FIDELITY: You MUST explicitly incorporate, prioritize, and weave ALL user-provided details—especially "Core Responsibilities", "Technical Skills", "Key Requirements", and custom notes—directly into your output.
+2. DO NOT OVERWRITE: NEVER replace, omit, or overwrite user-specified skills, tools, frameworks, or responsibilities with generic template defaults.
+3. EXPLICIT INTEGRATION: If the user provides specific technical skills (e.g., Python, AWS, React, Docker) or specific core responsibilities, create prominent dedicated bullet points and sections incorporating EVERY SINGLE specified skill and responsibility.
+
+FORMATTING & RESPONSE RULES:
+- Structure responses cleanly, professionally, and comprehensively.
+- Avoid raw markdown artifacts (like '#---' or '***'). Use clean bold headers, bullet points, and clean lists.
+- NEVER cut off or truncate answers midway — complete every response fully.`;
+
 const GEMINI_MODELS = [
   'gemini-1.5-flash',
   'gemini-1.5-flash-8b',
   'gemini-2.0-flash'
 ];
 
-// High-TPD Free Models (Groq - 5 Lakhs Tokens/Day)
 const GROQ_MODELS = [
-  'llama-3.1-8b-instant',      // 500,000 Tokens/Day (5 Lakhs TPD)
-  'llama-3.3-70b-versatile'    // Fallback model
+  'llama-3.1-8b-instant',
+  'llama-3.3-70b-versatile'
 ];
 
 async function callGemini(modelName, apiKey, system, prompt) {
+  const combinedSystem = system 
+    ? `${system}\n\n${DEFAULT_SYSTEM_INSTRUCTION}` 
+    : DEFAULT_SYSTEM_INSTRUCTION;
+
   const res = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`,
     {
@@ -25,10 +36,10 @@ async function callGemini(modelName, apiKey, system, prompt) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         system_instruction: { 
-          parts: [{ text: (system ? `${system}\n\n${DEFAULT_SYSTEM_INSTRUCTION}` : DEFAULT_SYSTEM_INSTRUCTION) }] 
+          parts: [{ text: combinedSystem }] 
         },
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { temperature: 0.5, maxOutputTokens: 8192 },
+        generationConfig: { temperature: 0.4, maxOutputTokens: 8192 },
       }),
     }
   );
@@ -37,6 +48,10 @@ async function callGemini(modelName, apiKey, system, prompt) {
 }
 
 async function callGroq(modelName, apiKey, system, prompt) {
+  const combinedSystem = system 
+    ? `${system}\n\n${DEFAULT_SYSTEM_INSTRUCTION}` 
+    : DEFAULT_SYSTEM_INSTRUCTION;
+
   const res = await fetch('https://api.groq.com/openai/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -46,10 +61,10 @@ async function callGroq(modelName, apiKey, system, prompt) {
     body: JSON.stringify({
       model: modelName,
       messages: [
-        { role: 'system', content: system ? `${system}\n\n${DEFAULT_SYSTEM_INSTRUCTION}` : DEFAULT_SYSTEM_INSTRUCTION },
+        { role: 'system', content: combinedSystem },
         { role: 'user', content: prompt }
       ],
-      temperature: 0.5,
+      temperature: 0.4,
       max_tokens: 4096
     })
   });
@@ -78,9 +93,14 @@ export default async function handler(req, res) {
     return;
   }
 
-  // Safety prompt check: Prevent single prompt inputs > 35,000 chars from blowing up token limits
+  // Force-highlight input fields if JD generator prompt contains responsibilities or technical skills
+  const lowerPrompt = prompt.toLowerCase();
+  if (lowerPrompt.includes('core responsibilities') || lowerPrompt.includes('technical skills') || lowerPrompt.includes('responsibilities')) {
+    prompt = `${prompt}\n\n[SYSTEM DIRECTIVE: Ensure EVERY Core Responsibility and Technical Skill specified above is explicitly included as dedicated bullet points in the generated Job Description.]`;
+  }
+
   if (prompt.length > 35000) {
-    prompt = prompt.substring(0, 35000) + "\n\n[Note: Prompt safety-trimmed to remain within free token quotas.]";
+    prompt = prompt.substring(0, 35000) + "\n\n[Note: Prompt safety-trimmed to fit free token limits.]";
   }
 
   const geminiKey = process.env.GEMINI_API_KEY;
@@ -88,14 +108,14 @@ export default async function handler(req, res) {
 
   if (!geminiKey && !groqKey) {
     res.status(500).json({
-      error: 'Missing GEMINI_API_KEY or GROQ_API_KEY in Vercel Environment Variables.'
+      error: 'Server missing GEMINI_API_KEY or GROQ_API_KEY in Vercel Environment Variables.'
     });
     return;
   }
 
   let lastError = null;
 
-  // 1. Try Gemini Models (Provides 10 Lakhs TPM Free)
+  // 1. Try Gemini Models (10 Lakhs Free Tokens/Minute)
   if (geminiKey) {
     for (const modelName of GEMINI_MODELS) {
       try {
@@ -114,7 +134,7 @@ export default async function handler(req, res) {
     }
   }
 
-  // 2. Try Groq Models (Provides 5 Lakhs TPD Free)
+  // 2. Fallback to Groq Models
   if (groqKey) {
     for (const modelName of GROQ_MODELS) {
       try {
